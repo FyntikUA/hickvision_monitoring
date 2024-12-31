@@ -67,7 +67,7 @@
 
 
 {
-    "Naftobaza": {
+    "baza": {
         "type": "analog",
         "ip": "11.11.11.11",
         "port": 80,
@@ -75,7 +75,7 @@
         "password": "admin",
         "valid_camera_ids": [1, 2, 3, 4, 5, 6, 7, 8]
     },
-    "Combi DVR 1": {
+    "DVR 1": {
         "type": "mixed",
         "ip": "11.11.11.11",
         "port": 80,
@@ -83,7 +83,7 @@
         "password": "admin",
         "valid_camera_ids": [1, 2, 3, 5, 6, 7]
     },
-    "Combi DVR 2": {
+    "DVR 2": {
         "type": "ip",
         "ip": "11.11.11.11",
         "port": 81,
