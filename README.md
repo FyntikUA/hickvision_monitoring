@@ -1,72 +1,78 @@
-# Відстеження Стану Камер DVR
+# DVR & Camera Monitoring System  
 
-Цей скрипт відстежує стан камер, підключених до DVR, та фіксує будь-які зміни в їх стані, особливо коли камера показує "NO VIDEO" або виходить з ладу. Також фіксуються проблеми з підключенням до DVR.
+## Overview  
+This Python-based monitoring system **automatically tracks the status of cameras connected to multiple DVRs (Digital Video Recorders)**. It checks the availability of DVRs, camera connection status (online/offline), recording state, and logs all events for further analysis.  
 
-## Вимоги
+The system is **scalable**, supports **multiple DVRs**, and works with **both analog and IP cameras**.  
 
-- Python 3.x
-- Бібліотека `requests`
+---
 
-## Встановлення
+## Features  
+✅ **Real-time camera status monitoring**  
+- Fetches camera data from **DVR API (ISAPI)**  
+- Identifies **IP address, port, user authentication, connection status, and recording state**  
 
-1. **Клонування репозиторію або завантаження скрипта:**
+✅ **Multi-DVR support**  
+- Configuration is stored in **`dvr_config.json`**  
+- Supports DVRs with **both analog and IP cameras**  
 
-    ```sh
-    git clone https://github.com/FyntikUA/hikvision_dvr
-    cd https://github.com/FyntikUA/hikvision_dvr
-    ```
+✅ **Change detection & logging**  
+- Logs events like **camera disconnection, reconnection, and recording state changes**  
+- Tracks **downtime duration**  
 
-2. **Створення віртуального середовища:**
+✅ **Flexible logging**  
+- Logs all events to `camera_log.txt`  
+- Example:  
 
-    ```sh
-    python -m venv venv
-    ```
+2025-02-02 14:35:12 - INFO - Successfully retrieved camera status for DVR. 
+2025-02-02 14:40:45 - WARNING - Camera 2 went offline at 14:40:45 
+2025-02-02 14:43:10 - WARNING - Camera 2 restored connection at 14:43:10. Downtime: 2m 25s
 
-3. **Активація віртуального середовища:**
 
-    - На Windows:
-        ```sh
-        .\venv\Scripts\activate
-        ```
-    - На MacOS/Linux:
-        ```sh
-        source venv/bin/activate
-        ```
+✅ **Continuous operation**  
+- Runs **every minute** using `schedule`  
+- Works **in the background**  
 
-4. **Встановлення необхідних бібліотек:**
+✅ **Parallel processing**  
+- Uses `ThreadPoolExecutor` for **faster execution** across multiple DVRs  
 
-    ```sh
-    pip install -r requirements.txt
-    ```
+---
 
-## Використання
+## Configuration  
 
-1. **Запуск скрипта:**
+1. **Install dependencies:**  
+ ```sh
+ pip install -r requirements.txt
+ ```
+
+## Using
+
+1. **Start script:**
 
     ```sh
     python monitor_cameras.py
     ```
 
-2. **Перевірка файлу журналу:**
+2. **Check log:**
 
-    Скрипт створить файл журналу з назвою `camera_log.txt` у тій же директорії, де зберігатимуться журнали станів камер та проблем з підключенням.
+    The script will create a log file named `camera_log.txt` in the same directory, where it will store logs of camera statuses and connection issues.
 
-## Налаштування
+## Config
 
-- Оновіть змінні `ip`, `port`, `username` та `password` у файлі dvr_config.json відповідно до даних для підключення до вашого DVR.
+- Update the variables `ip`, `port`, `username`, and `password` in the `dvr_config.json` file according to your DVR connection details.
 
-## Структура файлів
+## Files
 
 ```plaintext
 .
-├── monitor_cameras.py  # Основний скрипт
-├── requirements.txt    # Список необхідних бібліотек
-├── dvr_config.json     # Список рейстраторів DVR
-└── README.md           # Цей файл README
+├── monitor_cameras.py  # main script
+├── requirements.txt    # 
+├── dvr_config.json     # list DVR
+└── README.md           # README
 
 
 {
-    "baza": {
+    "base": {
         "type": "analog",
         "ip": "11.11.11.11",
         "port": 80,
