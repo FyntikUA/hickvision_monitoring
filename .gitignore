@@ -161,3 +161,4 @@ cython_debug/
 dvr_config.json
 offline_cameras_log.txt
 camera_log.txt
+monitor_cameras_ua.py
