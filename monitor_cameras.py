@@ -1,12 +1,12 @@
 import requests
+import threading
+import logging
+import json, time, os
+import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
 from requests.auth import HTTPDigestAuth
-import logging
-import json
-import xml.etree.ElementTree as ET
-from datetime import datetime
-import time, os
-from datetime import timedelta
+from datetime import datetime, timedelta
+from message import send_to_telegram
 
 # Налаштування журналювання
 logging.basicConfig(filename='camera_log.txt', level=logging.INFO,
@@ -54,79 +54,6 @@ def save_offline_info_to_file(dvr_name, camera_type, camera_identifier, start_ti
         file.write(f"DVR: {dvr_name}, {camera_identifier} was OFFLINE from {start_time} to {end_time} "
                    f"(Duration: {duration})\n")
 
-
-def save_dvr_offline_info_to_file(dvr_name, start_time, end_time, duration, file_path='offline_cameras_log.txt'):
-    """
-    Зберігає інформацію про відключення DVR у окремий файл.
-
-    :param dvr_name: Назва DVR.
-    :param start_time: Час початку відключення DVR.
-    :param end_time: Час відновлення роботи DVR.
-    :param duration: Тривалість відключення DVR.
-    :param file_path: Шлях до файлу, де буде зберігатись інформація (за замовчуванням offline_cameras_log.txt).
-    """
-    # Перевірка чи duration є об'єктом timedelta, якщо ні, конвертуємо
-    if isinstance(duration, timedelta):
-        duration_str = str(duration)
-    else:
-        duration_str = str(timedelta(seconds=duration))
-
-    # Відкриваємо файл для запису
-    with open(file_path, 'a') as file:
-        file.write(f"DVR: {dvr_name} was OFFLINE from {start_time} to {end_time} "
-                   f"(Duration: {duration_str})\n")
-
-# Змінні для зберігання статусу та часу
-dvr_status = {}
-
-# Функція для перевірки статусу DVR
-def check_dvr_status(dvr_name, dvr_data):
-    ip, port = dvr_data['ip'], dvr_data['port']
-    username, password = dvr_data['username'], dvr_data['password']
-    url = f"http://{ip}:{port}/ISAPI/System/Status"
-    
-    try:
-        response = requests.get(url, auth=HTTPDigestAuth(username, password), timeout=8)
-        
-        current_time = datetime.now()
-
-        if response.status_code == 200:
-            # Якщо DVR працює, перевіряємо, чи був він оффлайн
-            if dvr_name in dvr_status and dvr_status[dvr_name]['status'] == 'offline':
-                # DVR відновився, логуємо час відновлення
-                downtime_duration = current_time - dvr_status[dvr_name]['start_time']
-                logging.info(f"DVR {dvr_name} is back ONLINE at {current_time}, downtime duration: {downtime_duration}")
-                save_dvr_offline_info_to_file(dvr_name, dvr_status[dvr_name]['start_time'], current_time, downtime_duration)      
-                
-                # Оновлюємо статус
-                dvr_status[dvr_name] = {'status': 'online', 'start_time': None}
-        else:
-            # Якщо DVR не відповідає зі статусом не 200
-            if dvr_name not in dvr_status or dvr_status[dvr_name]['status'] == 'online':
-                # DVR став оффлайн, логуємо час втрати
-                logging.warning(f"DVR {dvr_name} is OFFLINE at {current_time}")
-                
-                # Оновлюємо статус
-                dvr_status[dvr_name] = {'status': 'offline', 'start_time': current_time}
-            else:
-                # Логуємо, що DVR все ще оффлайн
-                offline_duration = current_time - dvr_status[dvr_name]['start_time']
-                logging.warning(f"DVR {dvr_name} is STILL OFFLINE (Duration: {offline_duration}) at {current_time}")
-                
-    except requests.exceptions.RequestException as e:
-        # Логуємо помилку підключення
-        current_time = datetime.now()
-        #logging.error(f"Error checking {dvr_name}: {e}")
-        
-        # Якщо DVR ще не оффлайн, фіксуємо час
-        if dvr_name not in dvr_status or dvr_status[dvr_name]['status'] == 'online':
-            logging.warning(f"DVR {dvr_name} is OFFLINE due to connection error at {current_time}")
-            dvr_status[dvr_name] = {'status': 'offline', 'start_time': current_time}
-        else:
-            # Логуємо, що DVR все ще оффлайн через помилку
-            offline_duration = current_time - dvr_status[dvr_name]['start_time']
-            logging.warning(f"DVR {dvr_name} is STILL OFFLINE (Duration: {offline_duration}) due to error at {current_time}")
-
 def check_analog_camera_status(dvr_name, dvr_data):
     global camera_status, connection_lost_time
 
@@ -136,21 +63,21 @@ def check_analog_camera_status(dvr_name, dvr_data):
     url = f"http://{ip}:{port}/ISAPI/System/Video/inputs/channels"
 
     try:
-        #print(f"Sending request to analog DVR {dvr_name} ({ip})...")
         response = requests.get(url, auth=HTTPDigestAuth(username, password), timeout=8)
-        
-        #print(f'{dvr_name} cameras status: {camera_status[dvr_name]}')
-        
         if response.status_code == 200:
             print(f"Successfully retrieved data from analog DVR: {dvr_name}, status code: {response.status_code}")
-
+            current_time = datetime.now()
+            formatted_current_time = current_time.strftime("%Y-%m-%d %H:%M")
             if connection_lost_time[dvr_name]:
+                formatted_connection_lost_time = connection_lost_time[dvr_name].strftime("%Y-%m-%d %H:%M")
+                duration_lost_analog_cam = current_time - connection_lost_time[dvr_name]
+                formatted_duration_lost_time = f"{duration_lost_analog_cam}".split('.')[0]
                 logging.warning(f"Connection {dvr_name} restored") 
-                logging.warning(f"Downtime: {datetime.now() - connection_lost_time[dvr_name]}. From {connection_lost_time[dvr_name]} to {datetime.now()}")
+                logging.warning(f"Downtime: {formatted_duration_lost_time}. From {formatted_connection_lost_time} to {formatted_current_time}")
+                send_to_telegram(f"Connection {dvr_name} restored. Downtime: {formatted_duration_lost_time}. From {formatted_connection_lost_time} to {formatted_current_time}")
                 connection_lost_time[dvr_name] = None
 
             root = ET.fromstring(response.text)
-            current_time = datetime.now()
 
             for channel in root.findall('.//{http://www.hikvision.com/ver20/XMLSchema}VideoInputChannel'):
                 id_elem = channel.find('{http://www.hikvision.com/ver20/XMLSchema}id')
@@ -172,24 +99,36 @@ def check_analog_camera_status(dvr_name, dvr_data):
                         if (resolution == 'NO VIDEO' or enabled == 'false') and not prev_status['reason']:
                             prev_status['reason'] = True
                             prev_status['start_time'] = current_time
+                            
                             logging.warning(
+                                f"DVR: {dvr_name}, {name_cam} - {resolution if resolution == 'NO VIDEO' else 'offline'}, reason: {enabled if enabled == 'false' else 'NO VIDEO'} since {prev_status['start_time']}"
+                            )
+                            send_to_telegram(
                                 f"DVR: {dvr_name}, {name_cam} - {resolution if resolution == 'NO VIDEO' else 'offline'}, reason: {enabled if enabled == 'false' else 'NO VIDEO'} since {prev_status['start_time']}"
                             )
                         # Камера досі "NO VIDEO" або "offline"
                         elif (resolution == 'NO VIDEO' or enabled == 'false') and prev_status['reason']:
+                            formated_prev_status = prev_status['start_time'].strftime("%Y-%m-%d %H:%M")
                             duration = current_time - prev_status['start_time']
+                            formate_duration = f"{duration}".split('.')[0]
                             logging.warning(
-                                f"DVR: {dvr_name}, Analog {name_cam} - STILL {resolution if resolution == 'NO VIDEO' else 'offline'} (Duration: {duration} from {prev_status['start_time']})"
+                                f"DVR: {dvr_name}, Analog {name_cam} - STILL {resolution if resolution == 'NO VIDEO' else 'offline'} (Duration: {formate_duration} from {formated_prev_status})"
                             )
                         # Камера відновила роботу
                         elif (resolution != 'NO VIDEO' and enabled != 'false') and prev_status['reason']:
                             prev_status['reason'] = False
+                            formated_prev_status = prev_status['start_time'].strftime("%Y-%m-%d %H:%M")
                             end_time = current_time
+                            formated_end_time = end_time.strftime("%Y-%m-%d %H:%M")
                             duration = end_time - prev_status['start_time']
+                            formate_duration = f"{duration}".split('.')[0]
                             logging.info(
-                                f"DVR: {dvr_name}, Analog {name_cam} was {resolution if resolution == 'NO VIDEO' else 'offline'} from {prev_status['start_time']} to {end_time} (Duration: {duration})"
+                                f"DVR: {dvr_name}, Analog {name_cam} was {resolution if resolution == 'NO VIDEO' else 'offline'} from {formated_prev_status} to {formated_end_time} (Duration: {formate_duration})"
                             )
-                            save_offline_info_to_file(dvr_name, 'Analog', name_cam, prev_status['start_time'], end_time, duration)
+                            send_to_telegram(
+                                f"DVR: {dvr_name}, Analog {name_cam} was {resolution if resolution == 'NO VIDEO' else 'offline'} from {formated_prev_status} to {formated_end_time} (Duration: {formate_duration})"
+                            )
+                            save_offline_info_to_file(dvr_name, 'Analog', name_cam, prev_status['start_time'], formated_end_time, duration)
                     else:
                         # Додавання нової камери до статусів
                         camera_status[dvr_name][camera_id] = {
@@ -197,8 +136,11 @@ def check_analog_camera_status(dvr_name, dvr_data):
                             'start_time': current_time if resolution == 'NO VIDEO' or enabled == 'false' else None
                         }
                         if resolution == 'NO VIDEO' or enabled == 'false':
+                            send_to_telegram(
+                                f"DVR: {dvr_name}, Analog {name_cam}, reason: {resolution if resolution == 'NO VIDEO' else 'offline'} since {formatted_current_time}"
+                            )
                             logging.warning(
-                                f"DVR: {dvr_name}, Analog {name_cam} - {resolution if resolution == 'NO VIDEO' else 'offline'}, reason: {enabled if enabled == 'false' else 'NO VIDEO'} since {current_time}"
+                                f"DVR: {dvr_name}, Analog {name_cam}, reason: {resolution if resolution == 'NO VIDEO' else 'offline'} since {formatted_current_time}"
                             )
 
         elif response.status_code in {401, 403}:
@@ -208,40 +150,50 @@ def check_analog_camera_status(dvr_name, dvr_data):
             if connection_lost_time[dvr_name] is None:
                 connection_lost_time[dvr_name] = datetime.now()
     except Exception as e:
-        #logging.error(f"{dvr_name} Error: {e}")
-        
+        if connection_lost_time[dvr_name]:
+            formated_connection_dvr_lost_time = connection_lost_time[dvr_name].strftime("%Y-%m-%d %H:%M")
+            duration_lost_digital_dvr = current_time - connection_lost_time[dvr_name]  
+            formatted_duration_lost_time = f"{duration_lost_digital_dvr}".split('.')[0]
+            print(f"{dvr_name} still OFFLINE duration {formatted_duration_lost_time} from {formated_connection_dvr_lost_time}")
+            logging.warning(f"{dvr_name} still OFFLINE duration {formatted_duration_lost_time} from {formated_connection_dvr_lost_time}")
         if connection_lost_time[dvr_name] is None:
             connection_lost_time[dvr_name] = datetime.now()
-            logging.error(f"Connection {dvr_name} lost at: {connection_lost_time[dvr_name]}")
+            formatted_lost_time_dvr = datetime.now().strftime("%Y-%m-%d %H:%M")
+            print(f"Connection DVR {dvr_name} lost at: {formatted_lost_time_dvr}")
+            logging.error(f"Connection DVR {dvr_name} lost at: {formatted_lost_time_dvr}. Error: {e}")
+            send_to_telegram(f"Connection DVR {dvr_name} lost at: {formatted_lost_time_dvr}")
 
 # Адаптація для IP камер
 def check_ip_camera_status(dvr_name, dvr_data):
-    global camera_status, connection_lost_time
+    global camera_status
 
     current_time = datetime.now()
+    formatted_current_time = current_time.strftime("%Y-%m-%d %H:%M")
+    
+    
     ip, port = dvr_data['ip'], dvr_data['port']
     username, password = dvr_data['username'], dvr_data['password']
     url_channels = f"http://{ip}:{port}/ISAPI/ContentMgmt/InputProxy/channels"
     url_status = f"http://{ip}:{port}/ISAPI/System/workingstatus?format=json"
 
-    #print(f"Sending request to digital DVR {dvr_name} ({ip})...")
-
     try:
         
         response_channels = requests.get(url_channels, auth=HTTPDigestAuth(username, password), timeout=8)
         response_status = requests.get(url_status, auth=HTTPDigestAuth(username, password),timeout=8)
-        #print(f'{dvr_name} cameras status: {camera_status[dvr_name]}')
 
         if response_channels.status_code == 200 and response_status.status_code == 200:
-            print(f"Successfully retrieved data from digital DVR: {dvr_name}, status code: {response_status.status_code}")
-            #logging.info(f"{'-' * 24} Start {dvr_name} {'-' * 24}")
-        
-
-            # Відновлення після втрати зв'язку
+            print(f"Successfully retrieved data from digital DVR: {dvr_name}, status code: {response_channels.status_code}")
+            # DVR відповідає, обнуляємо статус втрати зв'язку
             if connection_lost_time.get(dvr_name):
-                logging.warning(f"Connection restored for DVR: {dvr_name} at: {current_time}. "
-                                f"Downtime: {current_time - connection_lost_time[dvr_name]}")
+                downtime = current_time - connection_lost_time[dvr_name]
+                formatted_downtime = str(downtime).split('.')[0]
+                logging.info(f"Connection restored for DVR: {dvr_name} at {formatted_current_time}. "
+                             f"Downtime: {formatted_downtime}")
+                send_to_telegram(f"Connection restored for DVR: {dvr_name} at {formatted_current_time}. "
+                                 f"Downtime: {formatted_downtime}")
                 connection_lost_time[dvr_name] = None
+         
+
 
             # Парсинг XML-даних про камери
             namespace = {'ns': 'http://www.hikvision.com/ver20/XMLSchema'}
@@ -280,22 +232,32 @@ def check_ip_camera_status(dvr_name, dvr_data):
                         # Камера перейшла в статус "не працює"
                         prev_status['issue'] = True
                         prev_status['start_time'] = current_time
-                        logging.warning(f"DVR: {dvr_name}, Digital {camera_info['name']} - OFFLINE since {prev_status['start_time']}")
+                        formatted_prev_status = prev_status['start_time'].strftime("%Y-%m-%d %H:%M")
+                        send_to_telegram(f"DVR: {dvr_name}, Digital {camera_info['name']} - OFFLINE since {formatted_prev_status}")
+                        logging.warning(f"DVR: {dvr_name}, Digital {camera_info['name']} - OFFLINE since {formatted_prev_status}")
                     elif online == 0 and prev_status['issue']:
                         # Камера досі не працює - показати тривалість
                         duration = current_time - prev_status['start_time']
+                        formatted_duration = str(duration).split('.')[0]
+                        start_time = prev_status['start_time'].strftime("%Y-%m-%d %H:%M")
                         logging.warning(
-                            f"DVR: {dvr_name}, Digital {camera_info['name']} - STILL OFFLINE (Duration: {duration} from {prev_status['start_time']})"
+                            f"DVR: {dvr_name}, Digital {camera_info['name']} - STILL OFFLINE (Duration: {formatted_duration} from {start_time})"
                         )
-                    # Камера відновила роботу
                     elif online == 1 and prev_status['issue']:
+                        # Камера відновила роботу
                         prev_status['issue'] = False
                         end_time = current_time
+                        formatted_end_time = end_time.strftime("%Y-%m-%d %H:%M")
                         duration = end_time - prev_status['start_time']
+                        formatted_duration = str(duration).split('.')[0]
                         logging.info(
-                            f"DVR: {dvr_name}, Digital {camera_info['name']} was OFFLINE from {prev_status['start_time']} to {end_time} (Duration: {duration})"
+                            f"DVR: {dvr_name}, Digital {camera_info['name']} now ONLINE. Was OFFLINE from {prev_status['start_time']} to {formatted_end_time} (Duration: {formatted_duration})"
+                        )
+                        send_to_telegram(
+                            f"DVR: {dvr_name}, Digital {camera_info['name']} now ONLINE. Was OFFLINE from {prev_status['start_time']} to {formatted_end_time} (Duration: {formatted_duration})"
                         )
                         save_offline_info_to_file(dvr_name, 'Digital', camera_info['name'], prev_status['start_time'], end_time, duration)
+
                 else:
                     # Додавання нової камери до статусів
                     if dvr_name not in camera_status:
@@ -305,10 +267,15 @@ def check_ip_camera_status(dvr_name, dvr_data):
                         'start_time': current_time if online == 0 else None
                     }
                     if online == 0:
-                        logging.warning(
-                            f"DVR: {dvr_name}, Digital {camera_info['name']} - OFFLINE at {current_time}"
+                        print(
+                            f"DVR: {dvr_name}, Digital {camera_info['name']} - OFFLINE at {formatted_current_time}"
                         )
-            #logging.info(f"{'-' * 25} End {dvr_name} {'-' * 25}")
+                        send_to_telegram(
+                            f"DVR: {dvr_name}, Digital {camera_info['name']} - OFFLINE at {formatted_current_time}"
+                        )
+                        logging.warning(
+                            f"DVR: {dvr_name}, Digital {camera_info['name']} - OFFLINE at {formatted_current_time}"
+                        )
                     
         elif response_channels.status_code in {401, 403} or response_status.status_code in {401, 403}:
             logging.error(f"Authentication {dvr_name} failed. Check your username and password.")
@@ -318,10 +285,25 @@ def check_ip_camera_status(dvr_name, dvr_data):
             if connection_lost_time[dvr_name] is None:
                 connection_lost_time[dvr_name] = datetime.now()
     except Exception as e:
-        #logging.error(f"{dvr_name} Error: {e}")
-        if connection_lost_time[dvr_name] is None:
-            connection_lost_time[dvr_name] = datetime.now()
-            logging.error(f"Connection {dvr_name} lost at: {connection_lost_time[dvr_name]}")
+        # Обробка помилок
+        if connection_lost_time.get(dvr_name) is None:
+            connection_lost_time[dvr_name] = current_time
+            logging.error(f"Connection lost for DVR: {dvr_name} at {formatted_current_time}. Error: {e}")
+            send_to_telegram(f"Connection lost for DVR: {dvr_name} at {formatted_current_time}")
+        else:
+            lost_time = connection_lost_time[dvr_name]
+            duration = current_time - lost_time
+            formatted_duration = str(duration).split('.')[0]
+            print((f"DVR: {dvr_name} is still offline. Duration: {formatted_duration} (since {lost_time.strftime('%Y-%m-%d %H:%M')})"))
+            logging.warning(f"DVR: {dvr_name} is still offline. Duration: {formatted_duration} (since {lost_time.strftime('%Y-%m-%d %H:%M')})")
+        
+def auto_start():
+    """Функція для автоматичного запуску моніторингу через 30 секунд бездіяльності."""
+    global timer
+    timer = 180  # Значення за замовчуванням
+    print("No input detected for 30 seconds. Starting monitoring with default timer: 180 seconds.")
+    logging.info("Auto-starting monitoring with default timer: 180 seconds.")
+    main()
 
 # Основний цикл з мультипоточністю
 def main():
@@ -338,36 +320,39 @@ def main():
                     executor.submit(check_analog_camera_status, dvr_name, dvr_data)
                 elif dvr_data.get('type') == 'ip':
                     executor.submit(check_ip_camera_status, dvr_name, dvr_data)
-                # Додати виклик для перевірки статусу самого DVR
-                executor.submit(check_dvr_status, dvr_name, dvr_data)
         print('---------------------------------------------')
         print("Press Ctrl+C to exit the program.")
         logging.info("-" * 25 + 'End checking' + "-" * 25)
-        time.sleep(timer)  # Перевіряти раз на хвилину
+        time.sleep(timer)
 
-# Меню програми
 def menu():
+    global timer
     while True:
         clear_console()
         print("========== DVR Monitoring Program ==========")
         print("1. Start Monitoring")
         print("2. Stop Monitoring")
         print("3. Exit")
+
+        # Запускаємо таймер на 30 секунд для автоматичного запуску
+        auto_start_timer = threading.Timer(30, auto_start)
+        auto_start_timer.start()
+
         choice = input("Select an option (1-3): ")
+        auto_start_timer.cancel()  # Зупиняємо таймер, якщо користувач зробив вибір
 
         if choice == '1':
             try:
-                global timer
                 while True:
                     timer_input = input("Enter the DVRs check period in seconds (default is 180): ").strip()
-                    if not timer_input:  # Якщо нічого не ввели
-                        timer = 180  # Значення за замовчуванням
+                    if not timer_input:
+                        timer = 180
                         print("No input detected. Using default value: 180 seconds.")
                         break
-                    elif timer_input.isdigit() and int(timer_input) > 0:  # Перевірка чи це число
+                    elif timer_input.isdigit() and int(timer_input) > 0:
                         timer = int(timer_input)
                         break
-                    else:  # Некоректне значення
+                    else:
                         print("Invalid input. Please enter a positive integer.")
 
                 logging.info("Starting monitoring...")
@@ -378,7 +363,7 @@ def menu():
         elif choice == '2':
             print("Stopping monitoring...")
             logging.info("Monitoring stopped.")
-            reset_status()  # Викликаємо функцію для обнулення
+            reset_status()
             print("Statuses have been reset.")
             time.sleep(2)
         elif choice == '3':
@@ -389,6 +374,7 @@ def menu():
         else:
             print("Invalid choice, please select again.")
             time.sleep(2)
+
 
 
 if __name__ == "__main__":
